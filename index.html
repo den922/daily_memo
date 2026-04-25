@@ -1,4 +1,4 @@
-<!-- version: v13 -->
+<!-- version: v14 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -13,7 +13,7 @@
 --text:#1f2937;
 --sub:#6b7280;
 --accent:#5fa8a3;
---header:#3e6f73;
+--danger:#e57373;
 }
 
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -28,7 +28,7 @@ flex-direction:column;
 
 /* HEADER */
 .header{
-background:var(--header);
+background:#3e6f73;
 color:#fff;
 padding:16px;
 font-weight:600;
@@ -63,17 +63,33 @@ overflow:auto;
 padding:8px;
 }
 
-.card{
+/* SWIPE */
+.swipe-wrap{
+position:relative;
+overflow:hidden;
+margin-bottom:6px;
+}
+.delete-bg{
+position:absolute;
+right:0;
+top:0;
+bottom:0;
+width:80px;
+background:var(--danger);
+color:#fff;
 display:flex;
-justify-content:space-between;
 align-items:center;
+justify-content:center;
+font-size:14px;
+}
+
+.card{
 background:#fff;
 border:1px solid var(--border);
 border-radius:8px;
 padding:10px;
-margin-bottom:6px;
 cursor:pointer;
-transition: transform 0.1s;
+transition: transform 0.2s;
 }
 .card:active{ transform: scale(0.96); }
 
@@ -82,16 +98,6 @@ display:flex;
 gap:10px;
 }
 .date{font-size:12px;color:var(--sub);}
-
-.actions{
-display:flex;
-gap:8px;
-}
-.actions button{
-border:none;
-background:none;
-font-size:16px;
-}
 
 /* FAB */
 .fab{
@@ -108,101 +114,44 @@ font-size:24px;
 }
 .fab:active{ transform: scale(0.96); }
 
-/* MODAL */
-.modal{
+/* TOAST */
+.toast{
 position:fixed;
-inset:0;
-background:rgba(0,0,0,0);
-display:none;
-transition: background 0.3s;
-}
-.modal.show{
-display:block;
-background:rgba(0,0,0,0.3);
-}
-
-/* SHEET */
-.sheet{
-position:absolute;
-bottom:0;
-width:100%;
-background:#fff;
-border-radius:16px 16px 0 0;
-padding:16px;
-max-height:90vh;
-overflow:auto;
-
-/* スライド */
-transform: translateY(100%);
-transition: transform 0.35s cubic-bezier(0.32,0.72,0,1);
-}
-.modal.show .sheet{
-transform: translateY(0);
-}
-
-/* ハンドル */
-.handle{
-width:40px;
-height:4px;
-background:#ccc;
-border-radius:2px;
-margin:0 auto 10px;
-}
-
-/* CLOSE */
-.close-btn{
-position:absolute;
-top:10px;
-right:12px;
-font-size:28px;
-border:none;
-background:#fff;
-border-radius:50%;
-width:36px;
-height:36px;
-box-shadow:0 2px 6px rgba(0,0,0,0.2);
-}
-.close-btn:active{ transform: scale(0.9); }
-
-/* INPUT */
-input,textarea{
-width:100%;
-margin-bottom:10px;
-padding:10px;
-border:1px solid var(--border);
-border-radius:8px;
-font-size:16px;
-}
-input:focus,textarea:focus{
-outline:none;
-border:2px solid var(--accent);
-}
-
-/* PERSON */
-.person-row{
-display:flex;
-gap:6px;
-margin-bottom:6px;
-}
-.person-row input{flex:1;}
-
-.add-person{
-display:flex;
-justify-content:flex-end;
-margin-bottom:10px;
-}
-
-/* BUTTON */
-.btn{
-padding:12px;
-border:none;
-border-radius:10px;
-background:var(--accent);
+bottom:30px;
+left:50%;
+transform:translateX(-50%);
+background:#1f2937;
 color:#fff;
-width:100%;
+padding:12px 16px;
+border-radius:10px;
+display:flex;
+gap:12px;
+align-items:center;
+opacity:0;
+pointer-events:none;
+transition:opacity 0.3s;
+}
+.toast.show{
+opacity:1;
+pointer-events:auto;
+}
+.toast button{
+background:none;
+border:none;
+color:#7dd3fc;
 font-weight:600;
 }
-.btn:active{ transform: scale(0.96); }
+
+/* DETAIL */
+.detail{
+position:fixed;
+inset:0;
+background:#fff;
+padding:20px;
+display:none;
+overflow:auto;
+}
+.detail.show{ display:block; }
 
 </style>
 </head>
@@ -218,78 +167,26 @@ font-weight:600;
 
 <div class="list" id="list"></div>
 
-<button class="fab" onclick="openModal()">+</button>
+<button class="fab" onclick="openDetail()">+</button>
 
-<div class="modal" id="modal">
-<div class="sheet" id="sheet">
-
-<div class="handle"></div>
-<button class="close-btn" onclick="closeModal()">×</button>
-
-<input id="date" type="date">
-<input id="title" placeholder="Title">
-
-<div id="peopleArea"></div>
-<div class="add-person">
-<button onclick="addPerson()">+ Add Person</button>
+<div class="toast" id="toast">
+<span>Deleted</span>
+<button onclick="undoDelete()">Undo</button>
 </div>
 
-<input id="place" placeholder="Where">
-<textarea id="content" placeholder="Memo"></textarea>
-<input id="tags" placeholder="Tag">
-
-<button class="btn" onclick="saveMemo()">Save</button>
-
-</div>
-</div>
+<div class="detail" id="detail"></div>
 
 <script>
-const KEY="memo_v13";
+const KEY="memo_v14";
 let memos=JSON.parse(localStorage.getItem(KEY)||"[]");
-let editIndex=null;
+let lastDeleted=null;
+let openSwipe=null;
 
-/* PERSON */
-function addPerson(name="",company=""){
-  const div=document.createElement("div");
-  div.className="person-row";
-  div.innerHTML=`
-    <input placeholder="Company" value="${company}">
-    <input placeholder="Name" value="${name}">
-    <button onclick="this.parentElement.remove()">×</button>
-  `;
-  peopleArea.appendChild(div);
-}
-
-/* DRAG CLOSE */
-let startY=0, currentY=0;
-const sheet=document.getElementById("sheet");
-
-sheet.addEventListener("touchstart",e=>{
-  startY=e.touches[0].clientY;
-});
-
-sheet.addEventListener("touchmove",e=>{
-  currentY=e.touches[0].clientY;
-  const diff=currentY-startY;
-  if(diff>0){
-    sheet.style.transform=`translateY(${diff}px)`;
-  }
-});
-
-sheet.addEventListener("touchend",()=>{
-  const diff=currentY-startY;
-  if(diff>120){
-    closeModal();
-  }else{
-    sheet.style.transform="";
-  }
-});
-
-/* SEARCH（簡易） */
+/* SEARCH */
 function search(q){
   if(!q) return memos;
   return memos.filter(m =>
-    (m.title+m.content+m.place).toLowerCase().includes(q.toLowerCase())
+    JSON.stringify(m).toLowerCase().includes(q.toLowerCase())
   );
 }
 
@@ -299,82 +196,150 @@ function render(){
     .sort((a,b)=> new Date(b.date)-new Date(a.date));
 
   list.innerHTML=res.map((m,i)=>`
-    <div class="card" onclick="openDetail(${i})">
-      <div class="card-left">
-        <div class="date">${m.date||""}</div>
-        <div>${m.title||"(No title)"}</div>
-      </div>
-      <div class="actions">
-        <button onclick="event.stopPropagation();editMemo(${i})">✏️</button>
-        <button onclick="event.stopPropagation();deleteMemo(${i})">🗑️</button>
+    <div class="swipe-wrap">
+      <div class="delete-bg" onclick="confirmDelete(${i})">Delete</div>
+
+      <div class="card"
+        ontouchstart="touchStart(event,this)"
+        ontouchmove="touchMove(event,this)"
+        ontouchend="touchEnd(event,this)"
+        onclick="openDetail(${i})">
+
+        <div class="card-left">
+          <div class="date">${m.date||""}</div>
+          <div>${m.title||"(No title)"}</div>
+        </div>
+
       </div>
     </div>
   `).join("");
 }
 
-/* MODAL */
-function openModal(){
-  modal.classList.add("show");
-  date.value=new Date().toISOString().split('T')[0];
-  title.value="";
-  content.value="";
-  place.value="";
-  tags.value="";
-  peopleArea.innerHTML="";
-  addPerson();
-  editIndex=null;
-}
-function closeModal(){
-  modal.classList.remove("show");
-  sheet.style.transform="";
+/* SWIPE */
+let startX=0,currentX=0,moved=false;
+
+function touchStart(e,el){
+  startX=e.touches[0].clientX;
+
+  if(openSwipe && openSwipe!==el){
+    openSwipe.style.transform="";
+    openSwipe=null;
+  }
 }
 
-/* SAVE */
-function saveMemo(){
-  const people=[...document.querySelectorAll(".person-row")]
-    .map(r=>{
-      const i=r.querySelectorAll("input");
-      return {company:i[0].value,name:i[1].value};
-    });
+function touchMove(e,el){
+  currentX=e.touches[0].clientX;
+  let diff=currentX-startX;
 
-  const memo={
-    date:date.value,
-    title:title.value,
-    content:content.value,
-    place:place.value,
-    people,
-    tags:tags.value.split(",").map(t=>t.trim()).filter(Boolean)
-  };
+  if(Math.abs(diff)>10) moved=true;
 
-  if(editIndex!==null){memos[editIndex]=memo;}
-  else{memos.unshift(memo);}
-
-  localStorage.setItem(KEY,JSON.stringify(memos));
-  closeModal();
-  render();
+  if(diff<0){
+    el.style.transform=`translateX(${diff}px)`;
+  }
 }
 
-/* EDIT */
-function editMemo(i){
-  const m=memos[i];
-  openModal();
-  date.value=m.date;
-  title.value=m.title;
-  content.value=m.content;
-  place.value=m.place;
-  tags.value=(m.tags||[]).join(", ");
-  peopleArea.innerHTML="";
-  (m.people||[]).forEach(p=>addPerson(p.name,p.company));
-  editIndex=i;
+function touchEnd(e,el){
+  if(moved){ e.stopPropagation(); }
+  moved=false;
+
+  let diff=currentX-startX;
+
+  if(diff < -80){
+    el.style.transform="translateX(-80px)";
+    openSwipe=el;
+  }
+  else if(diff > 40){
+    el.style.transform="";
+    openSwipe=null;
+  }
+  else{
+    el.style.transform="";
+  }
 }
 
 /* DELETE */
-function deleteMemo(i){
+function confirmDelete(i){
   if(confirm("Delete this memo?")){
+    lastDeleted={item:memos[i],index:i};
     memos.splice(i,1);
     localStorage.setItem(KEY,JSON.stringify(memos));
     render();
+    showToast();
   }
+}
+
+/* TOAST */
+let toastTimer=null;
+
+function showToast(){
+  toast.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>{
+    toast.classList.remove("show");
+    lastDeleted=null;
+  },3000);
+}
+
+function undoDelete(){
+  if(!lastDeleted) return;
+  memos.splice(lastDeleted.index,0,lastDeleted.item);
+  localStorage.setItem(KEY,JSON.stringify(memos));
+  render();
+  toast.classList.remove("show");
+  lastDeleted=null;
+}
+
+/* DETAIL */
+function openDetail(i){
+  if(i===undefined){
+    detail.innerHTML=`
+      <input id="date" type="date">
+      <input id="title" placeholder="Title">
+      <textarea id="content" placeholder="Memo"></textarea>
+      <button onclick="save()">Save</button>
+    `;
+  }else{
+    const m=memos[i];
+    detail.innerHTML=`
+      <h2>${m.title}</h2>
+      <p>${m.date}</p>
+      <p>${m.content}</p>
+      <button onclick="edit(${i})">Edit</button>
+    `;
+  }
+  detail.classList.add("show");
+}
+
+function save(){
+  memos.unshift({
+    date:date.value,
+    title:title.value,
+    content:content.value
+  });
+  localStorage.setItem(KEY,JSON.stringify(memos));
+  detail.classList.remove("show");
+  render();
+}
+
+function edit(i){
+  const m=memos[i];
+  detail.innerHTML=`
+    <input id="date" type="date" value="${m.date}">
+    <input id="title" value="${m.title}">
+    <textarea id="content">${m.content}</textarea>
+    <button onclick="update(${i})">Update</button>
+  `;
+}
+
+function update(i){
+  memos[i]={
+    date:date.value,
+    title:title.value,
+    content:content.value
+  };
+  localStorage.setItem(KEY,JSON.stringify(memos));
+  detail.classList.remove("show");
+  render();
 }
 
 render();
