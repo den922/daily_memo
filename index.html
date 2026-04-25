@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daily Memo</title>
+
+<style>
+:root {
+--bg:#f4f6f7;
+--surface:#fff;
+--border:#e5e7eb;
+--text:#1f2937;
+--sub:#6b7280;
+--accent:#5fa8a3;
+--header:#3e6f73;
+--accent-soft:#eef7f6;
+}
+
+*{box-sizing:border-box;margin:0;padding:0;}
+
+body{
+font-family:-apple-system,BlinkMacSystemFont,sans-serif;
+background:var(--bg);
+height:100vh;
+display:flex;
+flex-direction:column;
+}
+
+/* HEADER */
+.header{
+background:var(--header);
+color:#fff;
+padding:16px;
+font-weight:600;
+}
+
+/* SEARCH */
+.search{
+padding:10px;
+background:#fff;
+border-bottom:1px solid var(--border);
+}
+.search input{
+width:100%;
+padding:10px;
+border-radius:8px;
+border:1px solid var(--border);
+}
+
+/* LIST */
+.list{
+flex:1;
+overflow:auto;
+padding:10px;
+}
+
+.card{
+background:#fff;
+border:1px solid var(--border);
+border-radius:10px;
+padding:12px;
+margin-bottom:8px;
+}
+
+.title{font-weight:600;}
+.meta{font-size:12px;color:var(--sub);margin-top:4px;}
+
+.tag{
+font-size:10px;
+background:var(--accent-soft);
+padding:2px 6px;
+margin-right:4px;
+border-radius:6px;
+cursor:pointer;
+}
+.tag:active{opacity:0.6;}
+
+.highlight{
+background:rgba(95,168,163,0.2);
+}
+
+/* FAB */
+.fab{
+position:fixed;
+right:16px;
+bottom:20px;
+width:52px;
+height:52px;
+border-radius:50%;
+border:none;
+background:var(--accent);
+color:#fff;
+font-size:24px;
+}
+
+/* MODAL */
+.modal{
+position:fixed;
+inset:0;
+background:rgba(0,0,0,0.3);
+display:none;
+align-items:flex-end;
+}
+.modal.show{display:flex;}
+
+.sheet{
+background:#fff;
+width:100%;
+border-radius:16px 16px 0 0;
+padding:16px;
+max-height:90vh;
+overflow:auto;
+}
+
+input,textarea{
+width:100%;
+margin-bottom:10px;
+padding:10px;
+border:1px solid var(--border);
+border-radius:8px;
+}
+
+.person-row{
+display:flex;
+gap:6px;
+margin-bottom:6px;
+}
+.person-row input{flex:1;}
+
+.small-btn{
+padding:6px 8px;
+font-size:12px;
+border:none;
+border-radius:6px;
+background:#ddd;
+}
+
+.btn{
+padding:12px;
+border:none;
+border-radius:10px;
+background:var(--accent);
+color:#fff;
+width:100%;
+font-weight:600;
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">Daily Memo</div>
+
+<div class="search">
+<input id="search" placeholder="Search..." oninput="render()">
+</div>
+
+<div class="list" id="list"></div>
+
+<button class="fab" onclick="openModal()">+</button>
+
+<div class="modal" id="modal">
+<div class="sheet">
+
+<input id="date" type="date">
+<input id="title" placeholder="Title">
+<textarea id="content" placeholder="Content"></textarea>
+
+<div id="peopleArea"></div>
+<button class="small-btn" onclick="addPerson()">+ Add Person</button>
+
+<input id="place" placeholder="Where">
+<input id="tags" placeholder="Tags (comma)">
+
+<button class="btn" onclick="saveMemo()">Save</button>
+
+</div>
+</div>
+
+<script>
+const KEY="memo_v4";
+let memos=JSON.parse(localStorage.getItem(KEY)||"[]");
+
+/* --- person --- */
+function addPerson(name="",company=""){
+  const div=document.createElement("div");
+  div.className="person-row";
+  div.innerHTML=`
+    <input placeholder="Company" value="${company}">
+    <input placeholder="Name" value="${name}">
+    <button onclick="this.parentElement.remove()">×</button>
+  `;
+  peopleArea.appendChild(div);
+}
+
+/* --- tokenize (日本語OK) --- */
+function tok(t){
+  t=(t||"").toLowerCase();
+  const r=[];
+  for(let i=0;i<t.length-1;i++){
+    r.push(t.slice(i,i+2));
+  }
+  return r;
+}
+
+/* --- similarity --- */
+function sim(a,b){
+  const A=new Set(a),B=new Set(b);
+  let i=0;
+  A.forEach(x=>{if(B.has(x))i++;});
+  return i/(A.size+B.size-i||1);
+}
+
+/* --- search --- */
+function search(q){
+  if(!q) return memos.map(m=>({m,score:1}));
+
+  const qt=tok(q);
+
+  return memos.map(m=>{
+    const peopleText=(m.people||[])
+      .map(p=>p.company+" "+p.name)
+      .join(" ");
+
+    const text=[
+      m.title,
+      m.content,
+      peopleText,
+      m.place,
+      (m.tags||[]).join(" ")
+    ].join(" ");
+
+    return {m,score:sim(qt,tok(text))};
+  })
+  .filter(x=>x.score>0.1)
+  .sort((a,b)=>b.score-a.score);
+}
+
+/* --- highlight --- */
+function hl(text,q){
+  if(!q) return text;
+  try{
+    return text.replace(new RegExp(q,"gi"),
+      m=>`<span class="highlight">${m}</span>`);
+  }catch{
+    return text;
+  }
+}
+
+/* --- render --- */
+function render(){
+  const q=searchInput.value;
+  const res=search(q);
+
+  list.innerHTML=res.map(r=>{
+    const people=(r.m.people||[])
+      .map(p=>p.company+" "+p.name)
+      .join(", ");
+
+    return `
+    <div class="card">
+      <div class="title">${hl(r.m.title,q)}</div>
+      <div class="meta">${r.m.date||""} ${people}</div>
+      <div>${hl(r.m.content,q)}</div>
+      <div>
+        ${(r.m.tags||[]).map(t=>`
+          <span class="tag" onclick="filterByTag('${t}')">#${t}</span>
+        `).join("")}
+      </div>
+    </div>`;
+  }).join("");
+}
+
+/* --- tag filter --- */
+function filterByTag(tag){
+  if(searchInput.value === tag){
+    searchInput.value = "";
+  }else{
+    searchInput.value = tag;
+  }
+  render();
+}
+
+/* --- modal --- */
+function openModal(){
+  modal.classList.add("show");
+  peopleArea.innerHTML="";
+  addPerson();
+}
+
+function saveMemo(){
+  const people=[...document.querySelectorAll(".person-row")]
+    .map(r=>{
+      const i=r.querySelectorAll("input");
+      return {company:i[0].value,name:i[1].value};
+    });
+
+  const memo={
+    date:date.value,
+    title:title.value,
+    content:content.value,
+    place:place.value,
+    people,
+    tags:tags.value.split(",").map(t=>t.trim()).filter(Boolean)
+  };
+
+  memos.unshift(memo);
+  localStorage.setItem(KEY,JSON.stringify(memos));
+
+  modal.classList.remove("show");
+  render();
+}
+
+/* init */
+render();
+</script>
+
+</body>
+</html>
