@@ -6,7 +6,7 @@
 <title>Daily Memo</title>
 
 <style>
-:root {
+:root{
 --bg:#f4f6f7;
 --border:#e5e7eb;
 --text:#1f2937;
@@ -62,7 +62,6 @@ overflow:auto;
 padding:8px;
 }
 
-/* コンパクトカード */
 .card{
 display:flex;
 justify-content:space-between;
@@ -73,6 +72,7 @@ border-radius:8px;
 padding:10px;
 margin-bottom:6px;
 font-size:14px;
+cursor:pointer;
 }
 
 .card-left{
@@ -126,17 +126,21 @@ max-height:90vh;
 overflow:auto;
 }
 
-/* 右上× */
+/* CLOSE（date右上外） */
 .close-btn{
 position:absolute;
-top:10px;
-right:14px;
-font-size:26px;
+top:-10px;
+right:10px;
+font-size:28px;
 border:none;
-background:none;
+background:#fff;
+border-radius:50%;
+width:36px;
+height:36px;
+box-shadow:0 2px 6px rgba(0,0,0,0.2);
 }
 
-/* 入力欄 */
+/* INPUT */
 input,textarea{
 width:100%;
 margin-bottom:10px;
@@ -145,8 +149,6 @@ border:1px solid var(--border);
 border-radius:8px;
 font-size:16px;
 }
-
-/* フォーカス */
 input:focus,textarea:focus{
 outline:none;
 border:2px solid var(--accent);
@@ -176,6 +178,17 @@ color:#fff;
 width:100%;
 font-weight:600;
 }
+
+/* DETAIL */
+.detail{
+position:fixed;
+inset:0;
+background:#fff;
+display:none;
+overflow:auto;
+padding:16px;
+}
+.detail.show{display:block;}
 </style>
 </head>
 
@@ -192,32 +205,32 @@ font-weight:600;
 
 <button class="fab" onclick="openModal()">+</button>
 
+<!-- 入力 -->
 <div class="modal" id="modal">
 <div class="sheet">
-
 <button class="close-btn" onclick="closeModal()">×</button>
 
 <input id="date" type="date">
 <input id="title" placeholder="Title">
 
 <div id="peopleArea"></div>
-
 <div class="add-person">
 <button onclick="addPerson()">+ Add Person</button>
 </div>
 
 <input id="place" placeholder="Where">
 <textarea id="content" placeholder="Memo"></textarea>
-
 <input id="tags" placeholder="Tag">
 
 <button class="btn" onclick="saveMemo()">Save</button>
+</div>
+</div>
 
-</div>
-</div>
+<!-- 詳細 -->
+<div class="detail" id="detail"></div>
 
 <script>
-const KEY="memo_v10";
+const KEY="memo_v11";
 let memos=JSON.parse(localStorage.getItem(KEY)||"[]");
 let editIndex=null;
 
@@ -233,52 +246,86 @@ function addPerson(name="",company=""){
   peopleArea.appendChild(div);
 }
 
+/* TEXT統合（検索用） */
+function fullText(m){
+  const people=(m.people||[]).map(p=>p.company+" "+p.name).join(" ");
+  return [m.title,m.content,m.place,m.tags?.join(" "),people].join(" ").toLowerCase();
+}
+
+/* 2gram */
+function tok(t){
+  const r=[];
+  for(let i=0;i<t.length-1;i++) r.push(t.slice(i,i+2));
+  return r;
+}
+
+/* 類似度 */
+function sim(a,b){
+  const A=new Set(a),B=new Set(b);
+  let i=0;A.forEach(x=>{if(B.has(x))i++;});
+  return i/(A.size+B.size-i||1);
+}
+
 /* SEARCH */
 function search(q){
-  if(!q) return memos;
-  return memos.filter(m =>
-    (m.title+m.content+m.place).toLowerCase().includes(q.toLowerCase())
-  );
+  if(!q) return memos.map((m,i)=>({m,i,score:1}));
+  const qt=tok(q.toLowerCase());
+  return memos.map((m,i)=>{
+    return {m,i,score:sim(qt,tok(fullText(m)))};
+  }).filter(x=>x.score>0.1).sort((a,b)=>b.score-a.score);
 }
 
 /* RENDER */
 function render(){
   const q=searchInput.value;
-  const res=search(q).sort((a,b)=> new Date(b.date)-new Date(a.date));
+  const res=search(q).sort((a,b)=> new Date(b.m.date)-new Date(a.m.date));
 
-  list.innerHTML=res.map((m,i)=>`
-    <div class="card">
+  list.innerHTML=res.map(r=>`
+    <div class="card" onclick="openDetail(${r.i})">
       <div class="card-left">
-        <div class="date">${m.date||""}</div>
-        <div>${m.title||"(No title)"}</div>
+        <div class="date">${r.m.date||""}</div>
+        <div>${r.m.title||"(No title)"}</div>
       </div>
       <div class="actions">
-        <button onclick="editMemo(${i})">✏️</button>
-        <button onclick="deleteMemo(${i})">🗑️</button>
+        <button onclick="event.stopPropagation();editMemo(${r.i})">✏️</button>
+        <button onclick="event.stopPropagation();deleteMemo(${r.i})">🗑️</button>
       </div>
     </div>
   `).join("");
 }
 
+/* DETAIL */
+function openDetail(i){
+  const m=memos[i];
+  detail.innerHTML=`
+    <h2>${m.title||""}</h2>
+    <p>${m.date||""}</p>
+    <p>${m.place||""}</p>
+    <p>${(m.people||[]).map(p=>p.company+" "+p.name).join("<br>")}</p>
+    <hr>
+    <p>${m.content||""}</p>
+    <br>
+    <button onclick="editMemo(${i})">Edit</button>
+    <button onclick="deleteMemo(${i})">Delete</button>
+    <button onclick="closeDetail()">Close</button>
+  `;
+  detail.classList.add("show");
+}
+function closeDetail(){detail.classList.remove("show");}
+
 /* MODAL */
 function openModal(){
   modal.classList.add("show");
-
-  // 毎回リセット
-  date.value = new Date().toISOString().split('T')[0];
+  date.value=new Date().toISOString().split('T')[0];
   title.value="";
   content.value="";
   place.value="";
   tags.value="";
   peopleArea.innerHTML="";
   addPerson();
-
   editIndex=null;
 }
-
-function closeModal(){
-  modal.classList.remove("show");
-}
+function closeModal(){modal.classList.remove("show");}
 
 /* SAVE */
 function saveMemo(){
@@ -297,11 +344,8 @@ function saveMemo(){
     tags:tags.value.split(",").map(t=>t.trim()).filter(Boolean)
   };
 
-  if(editIndex!==null){
-    memos[editIndex]=memo;
-  }else{
-    memos.unshift(memo);
-  }
+  if(editIndex!==null){memos[editIndex]=memo;}
+  else{memos.unshift(memo);}
 
   localStorage.setItem(KEY,JSON.stringify(memos));
   closeModal();
