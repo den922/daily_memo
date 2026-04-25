@@ -1,3 +1,4 @@
+<!-- version: v12 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -71,7 +72,6 @@ border:1px solid var(--border);
 border-radius:8px;
 padding:10px;
 margin-bottom:6px;
-font-size:14px;
 cursor:pointer;
 }
 
@@ -79,8 +79,7 @@ cursor:pointer;
 display:flex;
 gap:10px;
 }
-
-.date{color:var(--sub);font-size:12px;}
+.date{font-size:12px;color:var(--sub);}
 
 .actions{
 display:flex;
@@ -121,16 +120,16 @@ bottom:0;
 width:100%;
 background:#fff;
 border-radius:16px 16px 0 0;
-padding:16px;
+padding:20px 16px 16px; /* 上余白増やしてボタン余裕 */
 max-height:90vh;
 overflow:auto;
 }
 
-/* CLOSE（date右上外） */
+/* 修正：見切れない位置 */
 .close-btn{
 position:absolute;
-top:-10px;
-right:10px;
+top:10px;
+right:12px;
 font-size:28px;
 border:none;
 background:#fff;
@@ -205,7 +204,7 @@ padding:16px;
 
 <button class="fab" onclick="openModal()">+</button>
 
-<!-- 入力 -->
+<!-- MODAL -->
 <div class="modal" id="modal">
 <div class="sheet">
 <button class="close-btn" onclick="closeModal()">×</button>
@@ -226,11 +225,11 @@ padding:16px;
 </div>
 </div>
 
-<!-- 詳細 -->
+<!-- DETAIL -->
 <div class="detail" id="detail"></div>
 
 <script>
-const KEY="memo_v11";
+const KEY="memo_v12";
 let memos=JSON.parse(localStorage.getItem(KEY)||"[]");
 let editIndex=null;
 
@@ -246,10 +245,16 @@ function addPerson(name="",company=""){
   peopleArea.appendChild(div);
 }
 
-/* TEXT統合（検索用） */
+/* 全文生成（ここ強化） */
 function fullText(m){
   const people=(m.people||[]).map(p=>p.company+" "+p.name).join(" ");
-  return [m.title,m.content,m.place,m.tags?.join(" "),people].join(" ").toLowerCase();
+  return [
+    m.title,
+    m.content,
+    m.place,
+    m.tags?.join(" "),
+    people
+  ].join(" ").toLowerCase();
 }
 
 /* 2gram */
@@ -259,26 +264,40 @@ function tok(t){
   return r;
 }
 
+/* ハイブリッド検索 */
+function search(q){
+  if(!q) return memos.map((m,i)=>({m,i,score:1}));
+
+  q=q.toLowerCase();
+  const qt=tok(q);
+
+  return memos.map((m,i)=>{
+    const text=fullText(m);
+
+    // 部分一致
+    let score = text.includes(q) ? 1 : 0;
+
+    // 2gram類似度
+    const simScore = sim(qt, tok(text));
+
+    return {m,i,score: score + simScore};
+  })
+  .filter(x=>x.score>0.1)
+  .sort((a,b)=>b.score-a.score);
+}
+
 /* 類似度 */
 function sim(a,b){
   const A=new Set(a),B=new Set(b);
-  let i=0;A.forEach(x=>{if(B.has(x))i++;});
+  let i=0;
+  A.forEach(x=>{if(B.has(x))i++;});
   return i/(A.size+B.size-i||1);
-}
-
-/* SEARCH */
-function search(q){
-  if(!q) return memos.map((m,i)=>({m,i,score:1}));
-  const qt=tok(q.toLowerCase());
-  return memos.map((m,i)=>{
-    return {m,i,score:sim(qt,tok(fullText(m)))};
-  }).filter(x=>x.score>0.1).sort((a,b)=>b.score-a.score);
 }
 
 /* RENDER */
 function render(){
-  const q=searchInput.value;
-  const res=search(q).sort((a,b)=> new Date(b.m.date)-new Date(a.m.date));
+  const res=search(searchInput.value)
+    .sort((a,b)=> new Date(b.m.date)-new Date(a.m.date));
 
   list.innerHTML=res.map(r=>`
     <div class="card" onclick="openDetail(${r.i})">
