@@ -1,4 +1,4 @@
-<!-- version: v12 -->
+<!-- version: v13 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -73,7 +73,9 @@ border-radius:8px;
 padding:10px;
 margin-bottom:6px;
 cursor:pointer;
+transition: transform 0.1s;
 }
+.card:active{ transform: scale(0.96); }
 
 .card-left{
 display:flex;
@@ -104,28 +106,50 @@ background:var(--accent);
 color:#fff;
 font-size:24px;
 }
+.fab:active{ transform: scale(0.96); }
 
 /* MODAL */
 .modal{
 position:fixed;
 inset:0;
-background:rgba(0,0,0,0.3);
+background:rgba(0,0,0,0);
 display:none;
+transition: background 0.3s;
 }
-.modal.show{display:block;}
+.modal.show{
+display:block;
+background:rgba(0,0,0,0.3);
+}
 
+/* SHEET */
 .sheet{
 position:absolute;
 bottom:0;
 width:100%;
 background:#fff;
 border-radius:16px 16px 0 0;
-padding:20px 16px 16px; /* 上余白増やしてボタン余裕 */
+padding:16px;
 max-height:90vh;
 overflow:auto;
+
+/* スライド */
+transform: translateY(100%);
+transition: transform 0.35s cubic-bezier(0.32,0.72,0,1);
+}
+.modal.show .sheet{
+transform: translateY(0);
 }
 
-/* 修正：見切れない位置 */
+/* ハンドル */
+.handle{
+width:40px;
+height:4px;
+background:#ccc;
+border-radius:2px;
+margin:0 auto 10px;
+}
+
+/* CLOSE */
 .close-btn{
 position:absolute;
 top:10px;
@@ -138,6 +162,7 @@ width:36px;
 height:36px;
 box-shadow:0 2px 6px rgba(0,0,0,0.2);
 }
+.close-btn:active{ transform: scale(0.9); }
 
 /* INPUT */
 input,textarea{
@@ -177,17 +202,8 @@ color:#fff;
 width:100%;
 font-weight:600;
 }
+.btn:active{ transform: scale(0.96); }
 
-/* DETAIL */
-.detail{
-position:fixed;
-inset:0;
-background:#fff;
-display:none;
-overflow:auto;
-padding:16px;
-}
-.detail.show{display:block;}
 </style>
 </head>
 
@@ -204,9 +220,10 @@ padding:16px;
 
 <button class="fab" onclick="openModal()">+</button>
 
-<!-- MODAL -->
 <div class="modal" id="modal">
-<div class="sheet">
+<div class="sheet" id="sheet">
+
+<div class="handle"></div>
 <button class="close-btn" onclick="closeModal()">×</button>
 
 <input id="date" type="date">
@@ -222,14 +239,12 @@ padding:16px;
 <input id="tags" placeholder="Tag">
 
 <button class="btn" onclick="saveMemo()">Save</button>
-</div>
-</div>
 
-<!-- DETAIL -->
-<div class="detail" id="detail"></div>
+</div>
+</div>
 
 <script>
-const KEY="memo_v12";
+const KEY="memo_v13";
 let memos=JSON.parse(localStorage.getItem(KEY)||"[]");
 let editIndex=null;
 
@@ -245,92 +260,57 @@ function addPerson(name="",company=""){
   peopleArea.appendChild(div);
 }
 
-/* 全文生成（ここ強化） */
-function fullText(m){
-  const people=(m.people||[]).map(p=>p.company+" "+p.name).join(" ");
-  return [
-    m.title,
-    m.content,
-    m.place,
-    m.tags?.join(" "),
-    people
-  ].join(" ").toLowerCase();
-}
+/* DRAG CLOSE */
+let startY=0, currentY=0;
+const sheet=document.getElementById("sheet");
 
-/* 2gram */
-function tok(t){
-  const r=[];
-  for(let i=0;i<t.length-1;i++) r.push(t.slice(i,i+2));
-  return r;
-}
+sheet.addEventListener("touchstart",e=>{
+  startY=e.touches[0].clientY;
+});
 
-/* ハイブリッド検索 */
+sheet.addEventListener("touchmove",e=>{
+  currentY=e.touches[0].clientY;
+  const diff=currentY-startY;
+  if(diff>0){
+    sheet.style.transform=`translateY(${diff}px)`;
+  }
+});
+
+sheet.addEventListener("touchend",()=>{
+  const diff=currentY-startY;
+  if(diff>120){
+    closeModal();
+  }else{
+    sheet.style.transform="";
+  }
+});
+
+/* SEARCH（簡易） */
 function search(q){
-  if(!q) return memos.map((m,i)=>({m,i,score:1}));
-
-  q=q.toLowerCase();
-  const qt=tok(q);
-
-  return memos.map((m,i)=>{
-    const text=fullText(m);
-
-    // 部分一致
-    let score = text.includes(q) ? 1 : 0;
-
-    // 2gram類似度
-    const simScore = sim(qt, tok(text));
-
-    return {m,i,score: score + simScore};
-  })
-  .filter(x=>x.score>0.1)
-  .sort((a,b)=>b.score-a.score);
-}
-
-/* 類似度 */
-function sim(a,b){
-  const A=new Set(a),B=new Set(b);
-  let i=0;
-  A.forEach(x=>{if(B.has(x))i++;});
-  return i/(A.size+B.size-i||1);
+  if(!q) return memos;
+  return memos.filter(m =>
+    (m.title+m.content+m.place).toLowerCase().includes(q.toLowerCase())
+  );
 }
 
 /* RENDER */
 function render(){
   const res=search(searchInput.value)
-    .sort((a,b)=> new Date(b.m.date)-new Date(a.m.date));
+    .sort((a,b)=> new Date(b.date)-new Date(a.date));
 
-  list.innerHTML=res.map(r=>`
-    <div class="card" onclick="openDetail(${r.i})">
+  list.innerHTML=res.map((m,i)=>`
+    <div class="card" onclick="openDetail(${i})">
       <div class="card-left">
-        <div class="date">${r.m.date||""}</div>
-        <div>${r.m.title||"(No title)"}</div>
+        <div class="date">${m.date||""}</div>
+        <div>${m.title||"(No title)"}</div>
       </div>
       <div class="actions">
-        <button onclick="event.stopPropagation();editMemo(${r.i})">✏️</button>
-        <button onclick="event.stopPropagation();deleteMemo(${r.i})">🗑️</button>
+        <button onclick="event.stopPropagation();editMemo(${i})">✏️</button>
+        <button onclick="event.stopPropagation();deleteMemo(${i})">🗑️</button>
       </div>
     </div>
   `).join("");
 }
-
-/* DETAIL */
-function openDetail(i){
-  const m=memos[i];
-  detail.innerHTML=`
-    <h2>${m.title||""}</h2>
-    <p>${m.date||""}</p>
-    <p>${m.place||""}</p>
-    <p>${(m.people||[]).map(p=>p.company+" "+p.name).join("<br>")}</p>
-    <hr>
-    <p>${m.content||""}</p>
-    <br>
-    <button onclick="editMemo(${i})">Edit</button>
-    <button onclick="deleteMemo(${i})">Delete</button>
-    <button onclick="closeDetail()">Close</button>
-  `;
-  detail.classList.add("show");
-}
-function closeDetail(){detail.classList.remove("show");}
 
 /* MODAL */
 function openModal(){
@@ -344,7 +324,10 @@ function openModal(){
   addPerson();
   editIndex=null;
 }
-function closeModal(){modal.classList.remove("show");}
+function closeModal(){
+  modal.classList.remove("show");
+  sheet.style.transform="";
+}
 
 /* SAVE */
 function saveMemo(){
