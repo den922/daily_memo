@@ -40,12 +40,21 @@ font-weight:600;
 padding:10px;
 background:#fff;
 border-bottom:1px solid var(--border);
+display:flex;
+gap:6px;
 }
 .search input{
-width:100%;
+flex:1;
 padding:10px;
 border-radius:8px;
 border:1px solid var(--border);
+}
+.search button{
+padding:10px;
+border:none;
+border-radius:8px;
+background:var(--accent);
+color:#fff;
 }
 
 /* LIST */
@@ -55,6 +64,7 @@ overflow:auto;
 padding:10px;
 }
 
+/* CARD */
 .card{
 background:#fff;
 border:1px solid var(--border);
@@ -73,11 +83,6 @@ padding:2px 6px;
 margin-right:4px;
 border-radius:6px;
 cursor:pointer;
-}
-.tag:active{opacity:0.6;}
-
-.highlight{
-background:rgba(95,168,163,0.2);
 }
 
 /* FAB */
@@ -113,20 +118,49 @@ max-height:90vh;
 overflow:auto;
 }
 
+/* ← ここが重要：入力全体の幅統一 */
+.form{
+max-width:480px;
+margin:0 auto;
+}
+
+/* 入力欄 */
 input,textarea{
 width:100%;
 margin-bottom:10px;
 padding:10px;
 border:1px solid var(--border);
 border-radius:8px;
+font-size:16px;
 }
 
+/* フォーカス */
+input:focus,textarea:focus{
+outline:none;
+border:2px solid var(--accent);
+}
+
+/* date崩れ防止 */
+input[type="date"]{
+appearance:none;
+-webkit-appearance:none;
+min-height:44px;
+}
+
+/* PERSON */
 .person-row{
 display:flex;
 gap:6px;
 margin-bottom:6px;
 }
 .person-row input{flex:1;}
+
+/* Add Person右寄せ */
+.add-person-wrap{
+display:flex;
+justify-content:flex-end;
+margin-bottom:10px;
+}
 
 .small-btn{
 padding:6px 8px;
@@ -136,6 +170,7 @@ border-radius:6px;
 background:#ddd;
 }
 
+/* BUTTON */
 .btn{
 padding:12px;
 border:none;
@@ -145,6 +180,20 @@ color:#fff;
 width:100%;
 font-weight:600;
 }
+
+.tag-suggest{
+display:flex;
+flex-wrap:wrap;
+gap:4px;
+margin-bottom:10px;
+}
+.tag-suggest span{
+font-size:10px;
+background:#eee;
+padding:4px 6px;
+border-radius:6px;
+cursor:pointer;
+}
 </style>
 </head>
 
@@ -153,7 +202,8 @@ font-weight:600;
 <div class="header">Daily Memo</div>
 
 <div class="search">
-<input id="search" placeholder="Search..." oninput="render()">
+<input id="searchInput" placeholder="Search..." onkeydown="if(event.key==='Enter') render()">
+<button onclick="render()">🔍</button>
 </div>
 
 <div class="list" id="list"></div>
@@ -163,26 +213,55 @@ font-weight:600;
 <div class="modal" id="modal">
 <div class="sheet">
 
+<div class="form">
+
 <input id="date" type="date">
-<input id="title" placeholder="Title">
-<textarea id="content" placeholder="Content"></textarea>
 
 <div id="peopleArea"></div>
+
+<div class="add-person-wrap">
 <button class="small-btn" onclick="addPerson()">+ Add Person</button>
+</div>
 
 <input id="place" placeholder="Where">
-<input id="tags" placeholder="Tags (comma)">
+
+<textarea id="content" placeholder="Memo"></textarea>
+
+<div class="tag-suggest" id="tagSuggest"></div>
+<input id="tags" placeholder="Tag">
 
 <button class="btn" onclick="saveMemo()">Save</button>
+
+</div>
 
 </div>
 </div>
 
 <script>
-const KEY="memo_v4";
+const KEY="memo_v9";
 let memos=JSON.parse(localStorage.getItem(KEY)||"[]");
+let editIndex=null;
 
-/* --- person --- */
+/* TAG */
+function getAllTags(){
+  const set=new Set();
+  memos.forEach(m=> (m.tags||[]).forEach(t=>set.add(t)));
+  return [...set];
+}
+function renderTagSuggest(){
+  tagSuggest.innerHTML=getAllTags().map(t=>
+    `<span onclick="addTag('${t}')">#${t}</span>`
+  ).join("");
+}
+function addTag(tag){
+  const current=tags.value.split(",").map(t=>t.trim()).filter(Boolean);
+  if(!current.includes(tag)){
+    current.push(tag);
+    tags.value=current.join(", ");
+  }
+}
+
+/* PERSON */
 function addPerson(name="",company=""){
   const div=document.createElement("div");
   div.className="person-row";
@@ -194,101 +273,61 @@ function addPerson(name="",company=""){
   peopleArea.appendChild(div);
 }
 
-/* --- tokenize (日本語OK) --- */
+/* SEARCH */
 function tok(t){
   t=(t||"").toLowerCase();
   const r=[];
-  for(let i=0;i<t.length-1;i++){
-    r.push(t.slice(i,i+2));
-  }
+  for(let i=0;i<t.length-1;i++) r.push(t.slice(i,i+2));
   return r;
 }
-
-/* --- similarity --- */
 function sim(a,b){
   const A=new Set(a),B=new Set(b);
-  let i=0;
-  A.forEach(x=>{if(B.has(x))i++;});
+  let i=0; A.forEach(x=>{if(B.has(x))i++;});
   return i/(A.size+B.size-i||1);
 }
-
-/* --- search --- */
 function search(q){
-  if(!q) return memos.map(m=>({m,score:1}));
-
+  if(!q) return memos.map((m,i)=>({m,i,score:1}));
   const qt=tok(q);
-
-  return memos.map(m=>{
-    const peopleText=(m.people||[])
-      .map(p=>p.company+" "+p.name)
-      .join(" ");
-
-    const text=[
-      m.title,
-      m.content,
-      peopleText,
-      m.place,
-      (m.tags||[]).join(" ")
-    ].join(" ");
-
-    return {m,score:sim(qt,tok(text))};
-  })
-  .filter(x=>x.score>0.1)
-  .sort((a,b)=>b.score-a.score);
+  return memos.map((m,i)=>{
+    const text=[m.content,m.place,(m.tags||[]).join(" ")].join(" ");
+    return {m,i,score:sim(qt,tok(text))};
+  }).filter(x=>x.score>0.1).sort((a,b)=>b.score-a.score);
 }
 
-/* --- highlight --- */
-function hl(text,q){
-  if(!q) return text;
-  try{
-    return text.replace(new RegExp(q,"gi"),
-      m=>`<span class="highlight">${m}</span>`);
-  }catch{
-    return text;
-  }
-}
-
-/* --- render --- */
+/* RENDER */
 function render(){
   const q=searchInput.value;
-  const res=search(q);
+  const res=search(q).sort((a,b)=> new Date(b.m.date)-new Date(a.m.date));
 
   list.innerHTML=res.map(r=>{
-    const people=(r.m.people||[])
-      .map(p=>p.company+" "+p.name)
-      .join(", ");
-
     return `
     <div class="card">
-      <div class="title">${hl(r.m.title,q)}</div>
-      <div class="meta">${r.m.date||""} ${people}</div>
-      <div>${hl(r.m.content,q)}</div>
-      <div>
-        ${(r.m.tags||[]).map(t=>`
-          <span class="tag" onclick="filterByTag('${t}')">#${t}</span>
-        `).join("")}
+      <div class="title">${r.m.date||""}</div>
+      <div class="meta">${r.m.place||""}</div>
+      <div>${r.m.content||""}</div>
+      <div>${(r.m.tags||[]).map(t=>`<span class="tag" onclick="filterByTag('${t}')">#${t}</span>`).join("")}</div>
+      <div class="actions">
+        <button onclick="editMemo(${r.i})">Edit</button>
+        <button onclick="deleteMemo(${r.i})">Delete</button>
       </div>
     </div>`;
   }).join("");
 }
 
-/* --- tag filter --- */
-function filterByTag(tag){
-  if(searchInput.value === tag){
-    searchInput.value = "";
-  }else{
-    searchInput.value = tag;
-  }
-  render();
-}
-
-/* --- modal --- */
+/* MODAL */
 function openModal(){
   modal.classList.add("show");
+  date.value = new Date().toISOString().split('T')[0];
   peopleArea.innerHTML="";
   addPerson();
+  renderTagSuggest();
+  editIndex=null;
+  setTimeout(()=>content.focus(),200);
 }
 
+function closeModal(){ modal.classList.remove("show"); }
+
+/* SAVE */
 function saveMemo(){
   const people=[...document.querySelectorAll(".person-row")]
     .map(r=>{
@@ -298,21 +337,42 @@ function saveMemo(){
 
   const memo={
     date:date.value,
-    title:title.value,
     content:content.value,
     place:place.value,
     people,
     tags:tags.value.split(",").map(t=>t.trim()).filter(Boolean)
   };
 
-  memos.unshift(memo);
-  localStorage.setItem(KEY,JSON.stringify(memos));
+  if(editIndex!==null){ memos[editIndex]=memo; }
+  else{ memos.unshift(memo); }
 
-  modal.classList.remove("show");
+  localStorage.setItem(KEY,JSON.stringify(memos));
+  closeModal();
   render();
 }
 
-/* init */
+/* EDIT */
+function editMemo(i){
+  const m=memos[i];
+  openModal();
+  date.value=m.date;
+  content.value=m.content;
+  place.value=m.place;
+  tags.value=(m.tags||[]).join(", ");
+  peopleArea.innerHTML="";
+  (m.people||[]).forEach(p=>addPerson(p.name,p.company));
+  editIndex=i;
+}
+
+/* DELETE */
+function deleteMemo(i){
+  if(confirm("Delete this memo?")){
+    memos.splice(i,1);
+    localStorage.setItem(KEY,JSON.stringify(memos));
+    render();
+  }
+}
+
 render();
 </script>
 
